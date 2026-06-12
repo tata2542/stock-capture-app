@@ -403,6 +403,13 @@
 
 <div class="toastpill" id="toastPill"></div>
 
+<div id="tabLock" style="display:none; position:fixed; inset:0; background:rgba(28,28,26,.92); z-index:99; color:#fff; text-align:center; padding:40px 24px">
+  <div style="font-size:44px; margin-top:18vh">⚠️</div>
+  <div style="font-size:20px; font-weight:700; margin:12px 0">แอพเปิดอยู่ในอีกหน้าต่างแล้ว</div>
+  <div style="font-size:15px; opacity:.8; margin-bottom:24px">ใช้ได้ทีละหน้าต่าง — กันข้อมูลเขียนทับกัน</div>
+  <button class="btn btn-primary tapbtn" style="max-width:320px; margin:0 auto" onclick="takeOver()">ใช้หน้าต่างนี้แทน</button>
+</div>
+
 <script>
 'use strict';
 // ─────────── constants / state ───────────
@@ -908,6 +915,23 @@ function meter(){
   const el=document.getElementById('storageMeter'); if(!el) return;
   el.textContent=`พื้นที่ใช้ไป ~${kb} KB / ~5,000 KB — Export แล้วล้าง = เริ่มชุดใหม่`;
   el.style.color=kb>4000?'var(--danger)':'';
+}
+
+// ─────────── single-tab guard (same device, same browser — one active tab only) ───────────
+const TAB_ID=uuid(); let tabFrozen=false;
+const bc=('BroadcastChannel' in window)?new BroadcastChannel('shopinput.tab'):null;
+function freezeTab(){ tabFrozen=true; document.getElementById('tabLock').style.display='block'; }
+function takeOver(){ if(bc) bc.postMessage({t:'takeover',id:TAB_ID}); S=load(); tabFrozen=false;
+  document.getElementById('tabLock').style.display='none';
+  if(S.user){ document.getElementById('avBtn').textContent=S.user.name[0]; show('capture'); } else { renderLogin(); show('login'); } }
+if(bc){
+  bc.onmessage=e=>{
+    const m=e.data||{};
+    if(m.t==='hello' && !tabFrozen) bc.postMessage({t:'active',to:m.id});
+    else if(m.t==='active' && m.to===TAB_ID && !tabFrozen) freezeTab();
+    else if(m.t==='takeover' && m.id!==TAB_ID) freezeTab();
+  };
+  bc.postMessage({t:'hello',id:TAB_ID});
 }
 
 // ─────────── boot ───────────
