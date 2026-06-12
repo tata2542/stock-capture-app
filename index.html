@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<!-- shop-system module 01: Raw Capture App v1 — per docs/01-input.md + docs/design/01-input-ui.md
+     Standalone: no server, no dependencies. Data in localStorage. Export = JSON file. -->
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>ระบบสต็อกร้านเครื่องมือช่าง</title>
+<!-- font loads async — the app must render instantly even with no internet (shop LAN) -->
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai+Looped:wght@400;500;600;700&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+  :root{
+    --canvas:#edebe8; --surface:#ffffff; --ink:#1c1c1a; --ink2:#44403a; --ink3:#8a857d;
+    --primary:#2a6fdb; --tint:#eef4fd; --tint2:#edf3fd; --success:#1f8a5b; --success-bg:#e9f5ef;
+    --danger:#d92d20; --danger2:#b3261e; --chip:#f2f1ef; --chip-ink:#57534e; --line:#e7e3dd;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none}
+  input,textarea{user-select:text; -webkit-user-select:text}
+  body{margin:0; background:var(--canvas); color:var(--ink);
+    font-family:"IBM Plex Sans Thai Looped","Noto Sans Thai",system-ui,sans-serif; font-size:16px}
+  .scr{display:none; max-width:520px; margin:0 auto; min-height:100vh; background:var(--surface);
+    padding:16px 16px 24px; position:relative}
+  .scr.on{display:block}
+  /* login/capture lay out as a column so the bottom bar sits at the bottom yet can never leave the page */
+  #scr-login.scr.on, #scr-capture.scr.on{display:flex; flex-direction:column}
+  #scr-review.scr, #scr-edit.scr{padding-bottom:40px}
+  .tapbtn{transition:transform .08s} .tapbtn:active{transform:scale(.95)}
+  h1{font-size:21px; margin:8px 0}
+  .hint{font-size:12.5px; color:var(--ink3)}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:14px; margin:0 0 12px}
+  .btn{display:flex; align-items:center; justify-content:center; gap:8px; width:100%; border:0;
+    border-radius:16px; min-height:52px; font:inherit; font-size:17px; font-weight:600; cursor:pointer}
+  .btn-primary{background:var(--primary); color:#fff}
+  .btn-line{background:#fff; border:1.5px solid var(--line); color:var(--ink2)}
+  .btn-danger-soft{background:#fdecea; color:var(--danger)}
+  .row{display:flex; gap:10px} .row>*{flex:1}
+  .pill{display:inline-block; background:var(--chip); color:var(--chip-ink); border-radius:999px;
+    padding:4px 11px; font-size:13px; margin:2px 4px 2px 0}
+  .pill.miss{border:1.5px dashed #cfc9c1; background:transparent}
+  .pill.ok{background:var(--success-bg); color:var(--success)}
+  .pill.warn{background:#fff3e0; color:#b26a00}
+
+  /* ── login ── */
+  .login-icon{width:74px; height:74px; border-radius:22px; background:var(--primary); color:#fff;
+    font-size:34px; display:flex; align-items:center; justify-content:center; margin:36px auto 18px}
+  .login-title{text-align:center; font-size:23px; font-weight:700; margin:0 0 6px}
+  .login-sub{text-align:center; color:var(--ink3); font-size:15px; margin-bottom:22px}
+  .ucard{display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:#fff;
+    border:1.5px solid var(--line); border-radius:18px; padding:14px; font:inherit; margin-bottom:12px; cursor:pointer}
+  .ucard.sel{border-color:var(--primary); background:var(--tint); outline:2px solid var(--primary)}
+  .avatar{width:44px; height:44px; border-radius:50%; background:var(--chip); color:var(--ink2);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px; flex:0 0 44px}
+  .ucard.sel .avatar{background:var(--primary); color:#fff}
+  .ucard .nm{font-weight:700; font-size:17px}
+  .ucard .ds{font-size:13px; color:var(--ink3)}
+  .rolebadge{margin-left:auto; background:var(--chip); color:var(--chip-ink); border-radius:999px;
+    padding:6px 12px; font-size:13px; flex:0 0 auto}
+  .rolebadge.admin{background:#fdf3e7; color:#b26a00}
+  .login-foot{position:sticky; bottom:0; margin:auto -16px 0;
+    padding:12px 16px 18px; background:linear-gradient(transparent,var(--surface) 30%)}
+  .login-foot .hint{text-align:center; margin-top:8px}
+
+  /* ── capture header ── */
+  .tophdr{display:flex; align-items:center; gap:10px; margin-bottom:12px}
+  .tophdr h1{flex:1; margin:0}
+  .listpill{display:flex; align-items:center; gap:6px; background:var(--tint); color:var(--primary);
+    border:0; border-radius:999px; padding:10px 14px; font:inherit; font-size:15px; font-weight:600; cursor:pointer}
+  .avbtn{width:42px; height:42px; border-radius:50%; background:var(--primary); color:#fff; border:0;
+    font:inherit; font-weight:700; font-size:17px; cursor:pointer}
+
+  /* ── zone card ── */
+  .zonecard{display:flex; align-items:center; gap:12px; background:var(--tint); border:0;
+    border-radius:18px; padding:14px; margin-bottom:12px}
+  .zonecard .zic{width:40px; height:40px; border-radius:50%; background:#fff; display:flex;
+    align-items:center; justify-content:center; font-size:18px; flex:0 0 40px}
+  .zonecard .zlabel{font-size:12.5px; color:var(--primary)}
+  .zonecard .zval{font-weight:700; font-size:16.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .zonecard .zval.unset{color:#b26a00}
+  .zonebtn{margin-left:auto; background:#fff; border:0; border-radius:999px; padding:11px 16px;
+    font:inherit; font-weight:600; color:var(--ink2); flex:0 0 auto; cursor:pointer}
+
+  /* ── transcript ── */
+  .lblrow{display:flex; justify-content:space-between; align-items:baseline; margin:2px 2px 7px}
+  .lbl{font-size:15px; font-weight:700}
+  .req::after{content:" *"; color:var(--danger)}
+  .transcript{width:100%; background:#faf9f7; border:1.5px solid var(--line); border-radius:16px;
+    padding:14px; font:inherit; font-size:21px; line-height:1.45; min-height:120px; color:var(--ink)}
+  .transcript:focus{outline:2px solid var(--primary)}
+  .transcript.listening{outline:2px solid var(--danger); background:#fff8f7}
+
+  /* ── cost/price split ── */
+  .splitcard{display:flex; background:#faf9f7; border:1.5px solid var(--line); border-radius:16px; overflow:hidden; margin-bottom:12px}
+  .splitcard>div{flex:1; padding:12px 14px}
+  .splitcard>div:first-child{border-right:1.5px solid var(--line)}
+  .splitcard label{display:block; font-size:13px; color:var(--ink3); margin-bottom:4px}
+  .splitcard input{width:100%; border:0; background:transparent; font:inherit; font-size:21px; font-weight:700; padding:0; color:var(--ink)}
+  .splitcard input:focus{outline:none}
+  .splitcard input::placeholder{color:#c9c4bc; font-weight:600}
+
+  /* ── evidence ── */
+  .evbtn{flex:1; display:flex; align-items:center; justify-content:center; gap:8px; background:#fff;
+    border:1.5px solid var(--line); border-radius:14px; min-height:52px; font:inherit; font-size:15.5px;
+    font-weight:600; color:var(--ink2); cursor:pointer}
+  .evbtn.done{border-color:var(--success); color:var(--success); background:var(--success-bg)}
+
+  /* ── flags ── */
+  .flaggrid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .flagbtn{position:relative; background:#fff; border:1.5px solid var(--line); border-radius:14px;
+    min-height:52px; font:inherit; font-size:15.5px; color:var(--ink2); cursor:pointer}
+  .flagbtn.sel{border-color:var(--danger); color:var(--danger); background:#fdecea; font-weight:600}
+  .flagbtn.addf{border-style:dashed; color:var(--ink3)}
+  .flagbtn .delx{position:absolute; top:-7px; right:-7px; width:22px; height:22px; border-radius:50%;
+    background:var(--ink2); color:#fff; border:0; font-size:12px; line-height:1; cursor:pointer}
+  .sevpanel{background:#fdf7f6; border:1.5px solid #f3d9d5; border-radius:16px; padding:12px; margin-top:10px}
+  .sevpanel .t{color:var(--danger2); font-weight:700; font-size:15px; margin-bottom:8px}
+  .sevrow{display:flex; gap:8px}
+  .sevrow button{flex:1; background:#fff; border:1.5px solid var(--line); border-radius:12px;
+    padding:8px 4px; font:inherit; cursor:pointer}
+  .sevrow .s1{font-size:14.5px; font-weight:700} .sevrow .s2{font-size:11.5px; color:var(--ink3)}
+  .sevrow button.sel{border-color:var(--danger); background:#fff}
+  .sevrow button.sel .s1{color:var(--danger)}
+  .dmgbtn{width:100%; margin-top:10px; background:transparent; border:1.5px dashed #e3b8b1;
+    border-radius:12px; padding:10px; font:inherit; font-size:14px; color:var(--danger2); cursor:pointer}
+  .dmgbtn.has{border-style:solid; background:#fff}
+
+  /* ── hero dock ── */
+  .dock{position:sticky; bottom:0; margin:auto -16px 0;
+    background:var(--tint2); border-radius:28px 28px 0 0; padding:14px 14px 16px; z-index:15;
+    box-shadow:0 -4px 20px rgba(42,111,219,.12)}
+  .micbtn{width:100%; background:#fff; border:2px solid var(--primary); border-radius:18px;
+    min-height:62px; font:inherit; cursor:pointer; color:var(--primary)}
+  .micbtn .m1{font-size:18px; font-weight:700}
+  .micbtn .m2{font-size:12.5px; color:var(--ink3)}
+  .micbtn.listening{background:var(--danger); border-color:var(--danger); color:#fff}
+  .micbtn.listening .m2{color:#ffd9d4}
+  .slider{position:relative; margin-top:10px; background:#dbe7fa; border-radius:18px; height:60px; overflow:hidden}
+  .slider .strack{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--primary); font-weight:700; font-size:17px}
+  .sknob{position:absolute; top:5px; left:5px; width:50px; height:50px; border-radius:50%;
+    background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center;
+    font-size:20px; touch-action:none; cursor:grab; box-shadow:0 2px 8px rgba(42,111,219,.4)}
+  .dock .hint{text-align:center; margin-top:8px}
+
+  /* ── sheet / modal ── */
+  .overlay{position:fixed; inset:0; background:rgba(28,28,26,.45); z-index:40; display:none}
+  .overlay.on{display:block}
+  .sheet{position:fixed; bottom:0; left:0; right:0; max-width:520px; margin:0 auto; background:#fff;
+    border-radius:26px 26px 0 0; padding:10px 18px 24px; z-index:41; display:none; max-height:82vh; overflow:auto}
+  .sheet.on{display:block}
+  .grab{width:44px; height:5px; border-radius:99px; background:#ddd8d1; margin:6px auto 12px}
+  .sheet h2{font-size:19px; margin:4px 0 6px}
+  .zgrid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0 14px}
+  .zgrid button{background:var(--chip); border:0; border-radius:14px; min-height:52px; font:inherit;
+    font-size:16.5px; font-weight:600; color:var(--ink2); cursor:pointer}
+  .zgrid button.sel{background:var(--primary); color:#fff}
+  .subrow{display:flex; align-items:center; min-height:52px; border-bottom:1px solid var(--line); font-size:16px}
+  .subrow .nm{flex:1; padding:8px 4px; cursor:pointer}
+  .subrow .bin{width:42px; height:42px; border-radius:12px; border:0; background:#fdecea; color:var(--danger);
+    font-size:16px; cursor:pointer; flex:0 0 42px}
+  .addsub{display:flex; gap:8px; margin-top:12px}
+  .addsub input{flex:1; border:1.5px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; min-height:48px}
+  .addsub button{flex:0 0 96px; border:0; border-radius:12px; background:var(--primary); color:#fff;
+    font:inherit; font-weight:700; cursor:pointer}
+  .popcard{position:fixed; left:50%; top:42%; transform:translate(-50%,-50%); background:#fff;
+    border-radius:22px; padding:24px; z-index:42; display:none; width:min(86%,360px); text-align:center;
+    box-shadow:0 8px 40px rgba(0,0,0,.25)}
+  .popcard.on{display:block}
+  .popcard .big{font-size:42px}
+  .popcard .t{font-size:19px; font-weight:700; margin:6px 0 14px}
+
+  /* ── review ── */
+  .rvhdr{display:flex; align-items:center; gap:10px}
+  .backbtn{width:44px; height:44px; border-radius:14px; border:1.5px solid var(--line); background:#fff;
+    font-size:17px; cursor:pointer; flex:0 0 44px}
+  .rvhdr .tt{flex:1} .rvhdr .tt h1{margin:0; font-size:19px}
+  .synclight{width:44px; height:44px; border-radius:50%; border:1.5px solid var(--line); background:#fff;
+    cursor:pointer; flex:0 0 44px; position:relative; font-size:17px}
+  .synclight .dot{position:absolute; top:6px; right:6px; width:11px; height:11px; border-radius:50%; background:#f59e0b}
+  .synclight .dot.green{background:var(--success)}
+  .selbtn{border:1.5px solid var(--line); background:#fff; border-radius:999px; padding:10px 16px;
+    font:inherit; font-weight:600; cursor:pointer; flex:0 0 auto}
+  .selbtn.on{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .prog{background:var(--chip); border-radius:999px; height:8px; overflow:hidden; margin:12px 0}
+  .prog>div{background:var(--primary); height:100%; transition:width .3s}
+  .searchrow{display:flex; gap:8px; margin-bottom:10px}
+  .searchrow input{flex:1; border:1.5px solid var(--line); border-radius:14px; padding:12px; font:inherit; min-height:48px; background:#faf9f7}
+  .fchips{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px}
+  .fchips button{border:1.5px solid var(--line); background:#fff; border-radius:999px; padding:9px 15px;
+    font:inherit; font-size:14.5px; cursor:pointer; color:var(--ink2)}
+  .fchips button.sel{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .icard{border:1px solid var(--line); border-radius:18px; margin-bottom:12px; overflow:hidden}
+  .icard .bd{padding:14px 14px 10px}
+  .icard .ttl{display:flex; gap:8px; align-items:flex-start}
+  .icard .ttl .tx{flex:1; font-size:17px; font-weight:600; line-height:1.4; word-break:break-word}
+  .icard .panel{background:#faf9f7; border-radius:12px; padding:10px 12px; margin:10px 0 6px; font-size:14.5px}
+  .icard .panel .pr{display:flex; gap:10px; padding:2px 0}
+  .icard .panel .pk{color:var(--ink3); flex:0 0 44px}
+  .icard .panel .pv{color:var(--primary); font-weight:600}
+  .icard .meta{display:flex; align-items:center; gap:8px; color:var(--ink3); font-size:13px; padding:4px 0}
+  .icard .meta .bin{margin-left:auto; width:38px; height:38px; border-radius:11px; border:0;
+    background:#fdecea; color:var(--danger); cursor:pointer}
+  .icard .ft{display:flex; border-top:1px solid var(--line)}
+  .icard .ft button{flex:1; border:0; background:#fff; min-height:50px; font:inherit; font-size:15.5px;
+    font-weight:600; cursor:pointer}
+  .icard .ft button:first-child{border-right:1px solid var(--line); color:var(--success)}
+  .icard .ft button:last-child{color:var(--ink2)}
+  .ckbox{width:24px; height:24px; border-radius:7px; border:2px solid #cfc9c1; flex:0 0 24px; margin-top:2px}
+  .ckbox.on{background:var(--primary); border-color:var(--primary); color:#fff; text-align:center; font-size:15px; line-height:21px}
+  .batchbar{position:sticky; bottom:0; margin:0 -16px; background:#fff;
+    border-top:1.5px solid var(--line); padding:10px 14px 16px; display:none; gap:10px; z-index:20}
+  .batchbar.on{display:flex}
+  .toastpill{position:fixed; left:50%; transform:translateX(-50%); bottom:18px; background:var(--ink);
+    color:#fff; border-radius:999px; padding:10px 18px; display:none; z-index:50; font-size:14.5px}
+  .toastpill.on{display:block}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="scr-login" class="scr">
+  <div class="login-icon">🏠</div>
+  <div class="login-title">ระบบสต็อกร้านเครื่องมือช่าง</div>
+  <div class="login-sub">เลือกชื่อของคุณเพื่อเข้าใช้งาน</div>
+  <div id="userCards"></div>
+  <div class="card">
+    <div class="lbl" style="margin-bottom:8px">เพิ่มชื่อใหม่</div>
+    <div class="row">
+      <input id="newName" placeholder="ชื่อ เช่น พี่หนึ่ง" style="border:1.5px solid var(--line); border-radius:12px; padding:10px 12px; font:inherit; min-height:48px">
+      <select id="newRole" style="flex:0 0 120px; border:1.5px solid var(--line); border-radius:12px; font:inherit; padding:0 8px">
+        <option value="staff">พนักงาน</option><option value="admin">ผู้ดูแล</option>
+      </select>
+      <button class="btn btn-line tapbtn" style="flex:0 0 80px; min-height:48px" onclick="addUser()">เพิ่ม</button>
+    </div>
+  </div>
+  <div class="login-foot">
+    <button class="btn btn-primary tapbtn" id="enterBtn" onclick="enter()" disabled style="opacity:.5">เข้าใช้งาน</button>
+    <div class="hint">สิทธิ์ "ผู้ดูแล" จัดการที่เก็บ/สถานะ และลบรายการของทุกคนได้</div>
+  </div>
+</div>
+
+<!-- ═══ CAPTURE ═══ -->
+<div id="scr-capture" class="scr">
+  <div class="tophdr">
+    <h1>เพิ่มสินค้าเข้าสต็อก</h1>
+    <button class="listpill tapbtn" onclick="show('review')">≡ รายการ<span id="hdrCount"></span> ›</button>
+    <button class="avbtn tapbtn" id="avBtn" onclick="account()">?</button>
+  </div>
+
+  <div class="zonecard">
+    <div class="zic">📍</div>
+    <div style="flex:1; min-width:0">
+      <div class="zlabel">เก็บเข้าโซน <span style="color:var(--danger)">*</span> (ค้างไว้จนกว่าจะเปลี่ยน)</div>
+      <div class="zval unset" id="zoneVal">ยังไม่เลือก — แตะเพื่อเลือก</div>
+    </div>
+    <button class="zonebtn tapbtn" onclick="openZoneSheet()">เปลี่ยน ⌄</button>
+  </div>
+
+  <div class="lblrow"><div class="lbl req">รายการนี้</div><div class="hint">แตะเพื่อพิมพ์แก้</div></div>
+  <textarea class="transcript" id="fText" placeholder="กดค้างปุ่มไมค์ด้านล่าง หรือแตะแล้วใช้ไมค์บนคีย์บอร์ด — พูด: ชื่อ + ยี่ห้อ + รุ่น/ขนาด"></textarea>
+
+  <div style="height:12px"></div>
+  <div class="splitcard">
+    <div>
+      <label>🔒 ทุน (รหัสโค้ด)</label>
+      <input id="fCost" placeholder="เช่น SLO" autocapitalize="characters" autocomplete="off">
+    </div>
+    <div>
+      <label>ราคาขาย (บาท)</label>
+      <input id="fPrice" inputmode="decimal" placeholder="฿ 0" autocomplete="off">
+    </div>
+  </div>
+
+  <div class="row">
+    <button class="evbtn tapbtn" id="photoBtn" onclick="document.getElementById('fPhoto').click()">📷 ถ่ายสลาก</button>
+    <button class="evbtn tapbtn" id="bcBtn" onclick="askBarcode()">▥ สแกนบาร์โค้ด</button>
+  </div>
+  <input type="file" id="fPhoto" accept="image/*" capture="environment" style="display:none">
+  <div class="hint" style="text-align:center; margin:8px 0 14px">พูดใหม่ / ถ่ายใหม่ / สแกนใหม่ = แทนของเดิมทั้งหมด</div>
+
+  <div class="lblrow"><div class="lbl">สถานะ (ถ้ามี)</div><div class="hint">อันที่เพิ่มเองมี × ลบได้</div></div>
+  <div class="flaggrid" id="flagGrid"></div>
+  <div class="hint" style="margin:8px 2px 0">ระดับความเสียหายแยกตามสถานะที่ติ๊ก</div>
+  <div id="sevPanels"></div>
+
+  <div class="dock">
+    <button class="micbtn tapbtn" id="micBtn">
+      <span class="m1">🎙 <span id="micLabel">กดค้างเพื่อพูด</span></span><br>
+      <span class="m2" id="micHint">พูดใหม่ = แทนข้อความเดิม</span>
+    </button>
+    <div class="slider" id="slider">
+      <div class="strack">เลื่อนเพื่อบันทึก →</div>
+      <div class="sknob" id="sknob">→</div>
+    </div>
+    <div class="hint">ใช้ท่าเลื่อน — กดโดนเฉยๆ ไม่บันทึก กันพลาด</div>
+  </div>
+</div>
+
+<!-- ═══ REVIEW ═══ -->
+<div id="scr-review" class="scr">
+  <div class="rvhdr">
+    <button class="backbtn tapbtn" onclick="show('capture')">‹</button>
+    <div class="tt"><h1>ไล่ตรวจรายการ</h1><div class="hint" id="progText"></div></div>
+    <button class="synclight tapbtn" id="syncLight" onclick="syncInfo()">📶<span class="dot" id="syncDot"></span></button>
+    <button class="selbtn tapbtn" id="selBtn" onclick="toggleSelect()">เลือก</button>
+  </div>
+  <div class="prog"><div id="progBar" style="width:0%"></div></div>
+  <div class="searchrow"><input id="searchBox" placeholder="🔍 ค้นหาข้อความ..." oninput="renderReview()"></div>
+  <div class="fchips" id="filterChips"></div>
+  <div id="reviewList"></div>
+  <div class="card">
+    <button class="btn btn-primary tapbtn" onclick="exportData(false)">📤 ส่งออกชุดใหม่ (<span id="expCount">0</span> รายการ)</button>
+    <div style="height:8px"></div>
+    <div class="row">
+      <button class="btn btn-line tapbtn" style="font-size:14.5px" onclick="exportData(true)">ส่งออกทั้งหมดอีกครั้ง</button>
+      <button class="btn btn-line tapbtn" style="font-size:14.5px" onclick="clearSubmitted()">🧹 ล้างที่ส่งแล้ว</button>
+    </div>
+    <div style="height:8px"></div>
+    <div class="row">
+      <button class="btn btn-line tapbtn" style="font-size:14.5px" onclick="copyForPaste()">📋 คัดลอกวางแชท</button>
+      <button class="btn btn-line tapbtn" style="font-size:14.5px" onclick="exportCSV()">📄 รายงาน Excel</button>
+    </div>
+    <div class="hint" style="text-align:center; margin-top:8px">ชุดใหม่ = เฉพาะ "รอส่ง" · ส่งซ้ำไม่ทำให้ข้อมูลซ้ำ (กันด้วยรหัสประจำรายการ)</div>
+    <div class="hint" style="text-align:center" id="storageMeter"></div>
+  </div>
+  <div class="batchbar" id="batchBar">
+    <button class="btn btn-line tapbtn" onclick="batchReview()">✓ ถูกต้อง (<span id="selCount1">0</span>)</button>
+    <button class="btn btn-danger-soft tapbtn" onclick="batchDelete()">🗑 ลบ (<span id="selCount2">0</span>)</button>
+  </div>
+</div>
+
+<!-- ═══ EDIT ═══ -->
+<div id="scr-edit" class="scr">
+  <div class="rvhdr" style="margin-bottom:12px">
+    <button class="backbtn tapbtn" onclick="show('review')">‹</button>
+    <div class="tt"><h1>แก้ไขรายการ</h1></div>
+  </div>
+  <div id="editWarn"></div>
+  <div class="zonecard">
+    <div class="zic">📍</div>
+    <div style="flex:1; min-width:0">
+      <div class="zlabel">เก็บเข้าโซน <span style="color:var(--danger)">*</span></div>
+      <div class="zval" id="eZoneVal">—</div>
+    </div>
+    <button class="zonebtn tapbtn" onclick="openZoneSheet(true)">เปลี่ยน ⌄</button>
+  </div>
+  <div class="lblrow"><div class="lbl req">รายการนี้</div></div>
+  <textarea class="transcript" id="eText"></textarea>
+  <div style="height:12px"></div>
+  <div class="splitcard">
+    <div><label>🔒 ทุน (รหัสโค้ด)</label><input id="eCost" autocapitalize="characters"></div>
+    <div><label>ราคาขาย (บาท)</label><input id="ePrice" inputmode="decimal"></div>
+  </div>
+  <div class="row">
+    <button class="evbtn tapbtn" id="ePhotoBtn" onclick="document.getElementById('ePhoto').click()">📷 ถ่ายใหม่ (แทนที่)</button>
+    <button class="evbtn tapbtn" id="eBcBtn" onclick="askBarcode(true)">▥ สแกนใหม่</button>
+  </div>
+  <input type="file" id="ePhoto" accept="image/*" capture="environment" style="display:none">
+  <div style="height:14px"></div>
+  <div class="lblrow"><div class="lbl">สถานะ (ถ้ามี)</div></div>
+  <div class="flaggrid" id="eFlagGrid"></div>
+  <div id="eSevPanels"></div>
+  <div style="height:16px"></div>
+  <button class="btn btn-primary tapbtn" onclick="saveEdit()">💾 บันทึกการแก้ไข</button>
+  <div style="height:8px"></div>
+  <button class="btn btn-danger-soft tapbtn" id="delBtn" onclick="deleteCurrent()">🗑 ลบรายการนี้</button>
+</div>
+
+<!-- ═══ sheets / popups ═══ -->
+<div class="overlay" id="overlay" onclick="closeSheets()"></div>
+
+<div class="sheet" id="zoneSheet">
+  <div class="grab"></div>
+  <h2>เลือกโซนจัดเก็บ</h2>
+  <div class="hint">โซนหลัก 4 ที่ของร้านลบไม่ได้ · จุดย่อยเพิ่ม/ลบเองได้ ระบบจำที่ใช้ล่าสุด</div>
+  <div class="lbl" style="margin-top:12px">โซนหลัก</div>
+  <div class="zgrid" id="zGrid"></div>
+  <div class="lblrow"><div class="lbl" id="subTitle">จุดย่อย</div><div class="hint" id="subHint">กดถังขยะเพื่อลบ</div></div>
+  <div id="subList"></div>
+  <div class="addsub">
+    <input id="newSub" placeholder="เพิ่มจุดย่อย เช่น ชั้นลอย">
+    <button class="tapbtn" onclick="addSub()">+ เพิ่ม</button>
+  </div>
+</div>
+
+<div class="sheet" id="dmgSheet">
+  <div class="grab"></div>
+  <h2 id="dmgTitle">รายละเอียดความเสียหาย</h2>
+  <textarea class="transcript" id="dmgNote" style="font-size:16px; min-height:90px" placeholder="เช่น มุมกล่องยุบ ตัวสินค้าปกติ"></textarea>
+  <div style="height:10px"></div>
+  <button class="evbtn tapbtn" id="dmgPhotoBtn" onclick="document.getElementById('dmgPhoto').click()" style="width:100%">📷 ถ่ายรูปจุดเสียหาย</button>
+  <input type="file" id="dmgPhoto" accept="image/*" capture="environment" style="display:none">
+  <div style="height:12px"></div>
+  <button class="btn btn-primary tapbtn" onclick="saveDmg()">บันทึกรายละเอียด</button>
+</div>
+
+<div class="popcard" id="saveCard">
+  <div class="big">✅</div>
+  <div class="t">บันทึกแล้ว</div>
+  <button class="btn btn-line tapbtn" onclick="undoSave()">↩ เลิกทำ (<span id="undoSec">5</span>)</button>
+  <div class="hint" style="margin-top:10px">แตะที่ว่างเพื่อทำชิ้นถัดไปต่อเลย</div>
+</div>
+
+<div class="toastpill" id="toastPill"></div>
+
+<script>
+'use strict';
+// ─────────── constants / state ───────────
+const ZONES=['หน้าร้าน','หลังร้าน','โกดัง','ออฟฟิศ'];
+const CORE_FLAGS=['กล่องชำรุด','สินค้าชำรุด','ยังไม่ได้ตรวจ'];
+const DAMAGE_FLAGS=['กล่องชำรุด','สินค้าชำรุด'];
+const SEV=[['เล็กน้อย','ขายได้ ลดราคา'],['ปานกลาง','รอเคลม'],['หนัก','ขายไม่ได้']];
+const LS='shopinput.v1';
+
+let S=load();
+function load(){
+  let d=null; try{ d=JSON.parse(localStorage.getItem(LS)); }catch(e){}
+  if(!d||!d.items) d={items:[],events:[],users:[{name:'เจ้าของ',role:'admin'}],
+    zoneSubs:{'หน้าร้าน':['ชั้นวาง A','ชั้นวาง B'],'หลังร้าน':[],'โกดัง':[],'ออฟฟิศ':[]},
+    lastSub:{},customFlags:[],user:null};
+  if(d.users.length&&typeof d.users[0]==='string') d.users=d.users.map(n=>({name:n,role:n==='เจ้าของ'?'admin':'staff'}));
+  if(d.user&&typeof d.user==='string') d.user=d.users.find(u=>u.name===d.user)||{name:d.user,role:'staff'};
+  d.zoneSubs=d.zoneSubs||{}; ZONES.forEach(z=>{ if(!d.zoneSubs[z]) d.zoneSubs[z]=[]; });
+  d.customFlags=d.customFlags||[]; d.events=d.events||[]; d.lastSub=d.lastSub||{};
+  return d;
+}
+function persist(){
+  try{ localStorage.setItem(LS,JSON.stringify(S)); meter(); return true; }
+  catch(e){ meter();
+    alert('⚠ ที่เก็บในเครื่องเต็ม — บันทึกไม่สำเร็จ!\nไปหน้า "ไล่ตรวจ" → กด Export → แล้วกด "ล้างที่ส่งแล้ว" เพื่อคืนพื้นที่ จึงบันทึกต่อได้');
+    return false; }
+}
+function uuid(){ try{return crypto.randomUUID();}catch(e){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16);});} }
+function now(){ return new Date().toISOString(); }
+function logEvent(action,capture_id,detail){ S.events.push({at:now(),by:S.user?S.user.name:null,action,capture_id:capture_id||null,detail:detail||null}); }
+function isAdmin(){ return S.user&&S.user.role==='admin'; }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function toast(msg){ const t=document.getElementById('toastPill'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(t._tm); t._tm=setTimeout(()=>t.classList.remove('on'),2600); }
+
+// ─────────── router ───────────
+function show(name){
+  document.querySelectorAll('.scr').forEach(el=>el.classList.remove('on'));
+  document.getElementById('scr-'+name).classList.add('on');
+  if(name==='review') renderReview();
+  if(name==='capture'){ renderCapture(); meter(); }
+  window.scrollTo(0,0);
+}
+
+// ─────────── login ───────────
+let pickedUser=null;
+function renderLogin(){
+  document.getElementById('userCards').innerHTML=S.users.map((u,i)=>`
+    <button class="ucard tapbtn ${pickedUser===i?'sel':''}" onclick="pickUser(${i})">
+      <div class="avatar">${esc(u.name[0])}</div>
+      <div><div class="nm">${esc(u.name)}</div>
+        <div class="ds">${u.role==='admin'?'จัดการที่เก็บ/สถานะ · ลบได้ทุกรายการ':'เก็บข้อมูล · แก้/ลบเฉพาะของตัวเอง'}</div></div>
+      <div class="rolebadge ${u.role==='admin'?'admin':''}">${u.role==='admin'?'ผู้ดูแล':'พนักงาน'}</div>
+    </button>`).join('');
+  const b=document.getElementById('enterBtn');
+  b.disabled=pickedUser===null; b.style.opacity=pickedUser===null?.5:1;
+}
+function pickUser(i){ pickedUser=i; renderLogin(); }
+function addUser(){
+  const v=document.getElementById('newName').value.trim(); if(!v) return;
+  if(!S.users.some(u=>u.name===v)) S.users.push({name:v,role:document.getElementById('newRole').value});
+  document.getElementById('newName').value=''; persist(); renderLogin();
+}
+function enter(){ if(pickedUser===null) return; S.user=S.users[pickedUser]; persist();
+  document.getElementById('avBtn').textContent=S.user.name[0]; show('capture'); }
+function account(){ if(confirm(S.user.name+' — ออกจากระบบ?')){ S.user=null; pickedUser=null; persist(); renderLogin(); show('login'); } }
+
+// ─────────── capture state ───────────
+let cap={zoneMain:null,zoneSub:null,photo:null,barcode:null,flags:[],severity:{},damage:{}};
+function allFlags(){ return [...CORE_FLAGS,...S.customFlags]; }
+function renderCapture(){
+  const zv=document.getElementById('zoneVal');
+  if(cap.zoneMain){ zv.textContent=cap.zoneMain+(cap.zoneSub?' · '+cap.zoneSub:''); zv.classList.remove('unset'); }
+  else{ zv.textContent='ยังไม่เลือก — แตะเพื่อเลือก'; zv.classList.add('unset'); }
+  document.getElementById('photoBtn').className='evbtn tapbtn'+(cap.photo?' done':'');
+  document.getElementById('photoBtn').innerHTML=cap.photo?'✓ มีรูปแล้ว (ถ่ายใหม่=แทน)':'📷 ถ่ายสลาก';
+  document.getElementById('bcBtn').className='evbtn tapbtn'+(cap.barcode?' done':'');
+  document.getElementById('bcBtn').innerHTML=cap.barcode?('✓ '+esc(cap.barcode)):'▥ สแกนบาร์โค้ด';
+  renderFlagsInto('flagGrid','sevPanels',cap,true);
+  const n=S.items.filter(i=>i.status==='pending').length;
+  document.getElementById('hdrCount').textContent=n?` (${n})`:'';
+}
+function renderFlagsInto(gridId,sevId,obj,withAdd){
+  const g=document.getElementById(gridId);
+  g.innerHTML=allFlags().map((f,i)=>{
+    const custom=i>=CORE_FLAGS.length;
+    return `<button class="flagbtn tapbtn ${obj.flags.includes(f)?'sel':''}" data-f="${esc(f)}">${esc(f)}
+      ${custom&&isAdmin()?`<span class="delx" data-delf="${esc(f)}">×</span>`:''}</button>`;
+  }).join('')+(withAdd?'<button class="flagbtn addf tapbtn" data-addf="1">+ เพิ่ม</button>':'');
+  g.onclick=e=>{
+    const del=e.target.closest('[data-delf]');
+    if(del){ e.stopPropagation(); const f=del.dataset.delf;
+      if(confirm('ลบสถานะ "'+f+'" ออกจากระบบ?')){ S.customFlags=S.customFlags.filter(x=>x!==f); persist(); renderFlagsInto(gridId,sevId,obj,withAdd); }
+      return; }
+    if(e.target.closest('[data-addf]')){ const v=prompt('ชื่อสถานะใหม่ เช่น สินค้าหมดอายุ'); if(v&&v.trim()){
+      if(!S.customFlags.includes(v.trim())) S.customFlags.push(v.trim()); persist(); renderFlagsInto(gridId,sevId,obj,withAdd);} return; }
+    const b=e.target.closest('[data-f]'); if(!b) return;
+    const f=b.dataset.f, ix=obj.flags.indexOf(f);
+    if(ix>=0){ obj.flags.splice(ix,1); delete obj.severity[f]; delete obj.damage[f]; }
+    else obj.flags.push(f);
+    renderFlagsInto(gridId,sevId,obj,withAdd);
+  };
+  document.getElementById(sevId).innerHTML=obj.flags.filter(f=>DAMAGE_FLAGS.includes(f)).map(f=>`
+    <div class="sevpanel">
+      <div class="t">ระดับความเสียหาย — ${esc(f)}</div>
+      <div class="sevrow">${SEV.map(([s,d])=>`
+        <button class="${obj.severity[f]===s?'sel':''}" data-sev="${esc(f)}|${s}">
+          <div class="s1">${s}</div><div class="s2">${d}</div></button>`).join('')}</div>
+      <button class="dmgbtn tapbtn ${obj.damage[f]?'has':''}" data-dmg="${esc(f)}">
+        ${obj.damage[f]?'✎ รายละเอียด: '+esc((obj.damage[f].note||'').slice(0,28)||'มีรูป'):'+ เพิ่มรายละเอียดความเสียหาย'}</button>
+    </div>`).join('');
+  document.getElementById(sevId).onclick=e=>{
+    const sv=e.target.closest('[data-sev]');
+    if(sv){ const [f,s]=sv.dataset.sev.split('|'); obj.severity[f]=s; renderFlagsInto(gridId,sevId,obj,withAdd); return; }
+    const dm=e.target.closest('[data-dmg]'); if(dm) openDmg(dm.dataset.dmg,obj,()=>renderFlagsInto(gridId,sevId,obj,withAdd));
+  };
+}
+
+// ─────────── zone sheet ───────────
+let sheetTarget=null, sheetMain=null, sheetDone=null;
+function openZoneSheet(forEdit){
+  sheetTarget=forEdit?edit:cap;
+  sheetMain=sheetTarget.zoneMain||ZONES[0];
+  sheetDone=forEdit?renderEdit:renderCapture;
+  renderSheet();
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('zoneSheet').classList.add('on');
+}
+function renderSheet(){
+  document.getElementById('zGrid').innerHTML=ZONES.map(z=>
+    `<button class="tapbtn ${sheetMain===z?'sel':''}" data-z="${esc(z)}">${esc(z)}</button>`).join('');
+  document.getElementById('zGrid').onclick=e=>{ const b=e.target.closest('[data-z]'); if(b){ sheetMain=b.dataset.z; renderSheet(); } };
+  document.getElementById('subTitle').textContent=`จุดย่อยใน "${sheetMain}"`;
+  const subs=S.zoneSubs[sheetMain]||[];
+  document.getElementById('subList').innerHTML=
+    `<div class="subrow"><div class="nm" data-pick="">ใช้ "${esc(sheetMain)}" โดยไม่ระบุจุดย่อย</div></div>`+
+    subs.map(s=>`<div class="subrow"><div class="nm" data-pick="${esc(s)}">${esc(s)}</div>
+      ${isAdmin()?`<button class="bin tapbtn" data-del="${esc(s)}">🗑</button>`:''}</div>`).join('');
+  document.getElementById('subList').onclick=e=>{
+    const del=e.target.closest('[data-del]');
+    if(del){ if(confirm('ลบจุดย่อย "'+del.dataset.del+'"? (รายการเก่ายังคงค่าเดิม)')){
+      S.zoneSubs[sheetMain]=S.zoneSubs[sheetMain].filter(x=>x!==del.dataset.del); persist(); renderSheet(); } return; }
+    const p=e.target.closest('[data-pick]'); if(p===null) return;
+    sheetTarget.zoneMain=sheetMain; sheetTarget.zoneSub=p.dataset.pick||null;
+    S.lastSub[sheetMain]=p.dataset.pick||'';
+    persist(); closeSheets(); sheetDone();
+  };
+  document.getElementById('newSub').placeholder=`เพิ่มจุดย่อยใน "${sheetMain}" เช่น ชั้นลอย`;
+}
+function addSub(){
+  const v=document.getElementById('newSub').value.trim(); if(!v) return;
+  if(!S.zoneSubs[sheetMain].includes(v)) S.zoneSubs[sheetMain].push(v);
+  document.getElementById('newSub').value=''; persist(); renderSheet();
+}
+function closeSheets(){ document.querySelectorAll('.sheet,.overlay').forEach(el=>el.classList.remove('on')); }
+
+// ─────────── damage detail sheet ───────────
+let dmgCtx=null;
+function openDmg(flag,obj,done){
+  dmgCtx={flag,obj,done};
+  document.getElementById('dmgTitle').textContent='รายละเอียด — '+flag;
+  document.getElementById('dmgNote').value=(obj.damage[flag]&&obj.damage[flag].note)||'';
+  document.getElementById('overlay').classList.add('on');
+  document.getElementById('dmgSheet').classList.add('on');
+}
+function saveDmg(){
+  const d=dmgCtx.obj.damage[dmgCtx.flag]||{};
+  d.note=document.getElementById('dmgNote').value.trim()||null;
+  dmgCtx.obj.damage[dmgCtx.flag]=d;
+  closeSheets(); dmgCtx.done();
+}
+
+// ─────────── photo ───────────
+function compressPhoto(file,cb){
+  const img=new Image();
+  img.onload=()=>{ const max=800,sc=Math.min(1,max/Math.max(img.width,img.height));
+    const cv=document.createElement('canvas'); cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+    cb(cv.toDataURL('image/jpeg',0.55)); URL.revokeObjectURL(img.src); };
+  img.src=URL.createObjectURL(file);
+}
+
+// ─────────── barcode (wedge scanner / typed; camera needs HTTPS — spec §6) ───────────
+function askBarcode(forEdit){
+  const v=prompt('ยิงสแกนเนอร์ลงช่องนี้ หรือพิมพ์เลขบาร์โค้ด', (forEdit?edit.barcode:cap.barcode)||'');
+  if(v===null) return;
+  const t=forEdit?edit:cap; t.barcode=v.trim()||null;
+  forEdit?renderEdit():renderCapture();
+}
+
+// ─────────── hold-to-talk (D1: new speech REPLACES) ───────────
+(function(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const btn=document.getElementById('micBtn'); let rec=null, finals='';
+  function start(e){
+    e.preventDefault();
+    if(!SR||!window.isSecureContext){
+      document.getElementById('fText').focus();
+      toast('เปิดไมค์บนคีย์บอร์ดเพื่อพูดได้เลย'); return;
+    }
+    finals=''; rec=new SR(); rec.lang='th-TH'; rec.continuous=true; rec.interimResults=true;
+    rec.onresult=ev=>{ let interim='';
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        if(ev.results[i].isFinal) finals+=ev.results[i][0].transcript; else interim+=ev.results[i][0].transcript; }
+      document.getElementById('fText').value=(finals+interim).trim(); };
+    rec.start();
+    btn.classList.add('listening'); document.getElementById('fText').classList.add('listening');
+    document.getElementById('micLabel').textContent='กำลังฟัง... ปล่อยเพื่อหยุด';
+  }
+  function stop(){
+    if(rec){ try{rec.stop();}catch(e){} rec=null; }
+    btn.classList.remove('listening'); document.getElementById('fText').classList.remove('listening');
+    document.getElementById('micLabel').textContent='กดค้างเพื่อพูด';
+  }
+  btn.addEventListener('pointerdown',start);
+  btn.addEventListener('pointerup',stop); btn.addEventListener('pointercancel',stop);
+  btn.addEventListener('contextmenu',e=>e.preventDefault());
+})();
+
+// ─────────── slide-to-save (D2) ───────────
+(function(){
+  const knob=document.getElementById('sknob'), slider=document.getElementById('slider');
+  let startX=null;
+  knob.addEventListener('pointerdown',e=>{ startX=e.clientX; try{knob.setPointerCapture(e.pointerId);}catch(_){} });
+  knob.addEventListener('pointermove',e=>{
+    if(startX===null) return;
+    const max=slider.clientWidth-60;
+    const dx=Math.max(0,Math.min(max,e.clientX-startX));
+    knob.style.transform=`translateX(${dx}px)`;
+  });
+  knob.addEventListener('pointerup',e=>{
+    if(startX===null) return;
+    const max=slider.clientWidth-60;
+    const dx=Math.max(0,Math.min(max,e.clientX-startX));
+    knob.style.transition='transform .18s'; knob.style.transform='translateX(0)';
+    setTimeout(()=>knob.style.transition='',200);
+    startX=null;
+    if(dx>max*0.72) saveItem();
+  });
+})();
+
+// ─────────── save + undo card (D3) ───────────
+let lastSavedId=null, undoTimer=null, undoTick=null;
+function saveItem(){
+  const text=document.getElementById('fText').value.trim();
+  if(!text){ toast('ยังไม่มีข้อความสินค้า — กดค้างปุ่มไมค์แล้วพูด'); return; }
+  if(!cap.zoneMain){ toast('เลือกโซนที่เก็บก่อน'); openZoneSheet(); return; }
+  if(lastSavedId) finalizeUndo(); // ปิดรอบก่อนหน้า (§8.1 กันบันทึกรัว)
+  const item={
+    client_capture_id:uuid(), revision:1, supersedes_capture_id:null,
+    created_by:S.user.name, created_at:now(), updated_at:now(),
+    zone_main:cap.zoneMain, zone_sub:cap.zoneSub||null,
+    text,
+    cost_code:document.getElementById('fCost').value||null,
+    sale_price:document.getElementById('fPrice').value||null,   // string, decimal-capable (hard rule 2)
+    qty_text:null,
+    barcode_value:cap.barcode, photo:cap.photo,
+    flags:[...cap.flags], severity:{...cap.severity}, damage_details:{...cap.damage},
+    note:null, status:'pending', reviewed:false, exported_at:null
+  };
+  S.items.push(item); logEvent('create',item.client_capture_id);
+  if(!persist()){ S.items.pop(); S.events.pop(); return; }  // storage full: roll back, keep the form filled
+  lastSavedId=item.client_capture_id;
+  // reset — zone persists (D4)
+  document.getElementById('fText').value=''; document.getElementById('fCost').value='';
+  document.getElementById('fPrice').value='';
+  cap.photo=null; cap.barcode=null; cap.flags=[]; cap.severity={}; cap.damage={};
+  renderCapture();
+  const card=document.getElementById('saveCard'); card.classList.add('on');
+  let s=5; document.getElementById('undoSec').textContent=s;
+  clearInterval(undoTick); undoTick=setInterval(()=>{ s--; document.getElementById('undoSec').textContent=s; },1000);
+  clearTimeout(undoTimer); undoTimer=setTimeout(finalizeUndo,5000);
+  // แตะที่ว่างนอกการ์ด = ปิดทันที ทำชิ้นถัดไปต่อ (delay กัน gesture บันทึกเองมาปิด)
+  setTimeout(()=>document.addEventListener('pointerdown',outsideDismiss,true),80);
+}
+function outsideDismiss(e){
+  if(!document.getElementById('saveCard').contains(e.target)) finalizeUndo();
+}
+function finalizeUndo(){
+  clearTimeout(undoTimer); clearInterval(undoTick);
+  document.removeEventListener('pointerdown',outsideDismiss,true);
+  document.getElementById('saveCard').classList.remove('on'); lastSavedId=null;
+}
+function undoSave(){
+  if(lastSavedId){ S.items=S.items.filter(i=>i.client_capture_id!==lastSavedId);
+    logEvent('delete',lastSavedId,'undo'); persist(); renderCapture(); toast('เลิกทำแล้ว'); }
+  finalizeUndo();
+}
+
+// ─────────── review ───────────
+let filter='pending', selectMode=false, selected=new Set();
+const FILTERS={pending:'ยังไม่ตรวจ',incomplete:'หลักฐานไม่ครบ',reviewed:'ตรวจแล้ว'};
+function visible(){ return S.items.filter(i=>i.status!=='superseded'); }
+function incomplete(i){ return !i.reviewed&&(!i.photo||!i.barcode_value||!i.cost_code); }
+function canDelete(i){ return i.status==='pending'&&(isAdmin()||i.created_by===S.user.name); }
+function renderReview(){
+  const all=visible();
+  const sets={pending:all.filter(i=>!i.reviewed),incomplete:all.filter(incomplete),reviewed:all.filter(i=>i.reviewed)};
+  document.getElementById('filterChips').innerHTML=Object.entries(FILTERS).map(([k,v])=>
+    `<button class="${filter===k?'sel':''} tapbtn" onclick="setFilter('${k}')">${v} (${sets[k].length})</button>`).join('');
+  const today=new Date().toDateString();
+  const todayItems=all.filter(i=>new Date(i.created_at).toDateString()===today);
+  const left=todayItems.filter(i=>!i.reviewed).length;
+  document.getElementById('progText').textContent=`เหลือตรวจ ${left} จาก ${todayItems.length} ชิ้นวันนี้`;
+  const done=all.filter(i=>i.reviewed).length;
+  document.getElementById('progBar').style.width=all.length?(100*done/all.length)+'%':'0%';
+  const pend=S.items.filter(i=>i.status==='pending').length;
+  document.getElementById('syncDot').className='dot'+(pend?'':' green');
+  document.getElementById('expCount').textContent=pend;
+  const q=(document.getElementById('searchBox').value||'').toLowerCase();
+  let list=sets[filter]||[];
+  if(q) list=list.filter(i=>i.text.toLowerCase().includes(q));
+  document.getElementById('reviewList').innerHTML=list.slice().reverse().map(i=>{
+    const miss=[!i.photo&&'ไม่มีรูปสลาก',!i.barcode_value&&'ไม่มีบาร์โค้ด',!i.cost_code&&'ไม่มีโค้ดทุน'].filter(Boolean);
+    const priceLine=[i.cost_code?('ทุน '+i.cost_code):null,i.sale_price?('ขาย ฿'+i.sale_price):null].filter(Boolean).join(' · ');
+    return `<div class="icard">
+      <div class="bd">
+        <div class="ttl">
+          ${selectMode?`<div class="ckbox ${selected.has(i.client_capture_id)?'on':''}" onclick="toggleSel('${i.client_capture_id}')">${selected.has(i.client_capture_id)?'✓':''}</div>`:''}
+          <div class="tx">${esc(i.text)}</div>
+          <span class="pill ${i.status==='submitted'?'ok':'warn'}" style="flex:0 0 auto">${i.status==='submitted'?'ส่งแล้ว':'รอส่ง'}</span>
+        </div>
+        <div class="panel">
+          <div class="pr"><div class="pk">โซน</div><div class="pv">${esc(i.zone_main)}${i.zone_sub?' · '+esc(i.zone_sub):''}</div></div>
+          ${priceLine?`<div class="pr"><div class="pk">ราคา</div><div class="pv">${esc(priceLine)}</div></div>`:''}
+        </div>
+        <div>${i.flags.map(f=>`<span class="pill" style="background:#fdecea;color:var(--danger)">${esc(f)}${i.severity[f]?' · '+i.severity[f]:''}</span>`).join('')}
+        ${miss.map(m=>`<span class="pill miss">${m}</span>`).join('')}</div>
+        <div class="meta">${esc(i.created_by)} · ${new Date(i.created_at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}
+          ${canDelete(i)&&!selectMode?`<button class="bin tapbtn" onclick="quickDelete('${i.client_capture_id}')">🗑</button>`:''}</div>
+      </div>
+      ${!selectMode?`<div class="ft">
+        ${!i.reviewed?`<button onclick="markReviewed('${i.client_capture_id}')">✓ ถูกต้อง</button>`:'<button disabled style="color:var(--success)">✓ ตรวจแล้ว</button>'}
+        <button onclick="openEdit('${i.client_capture_id}')">✎ แก้ไข</button>
+      </div>`:''}
+    </div>`;
+  }).join('')||'<div class="card hint" style="text-align:center">— ไม่มีรายการ —</div>';
+  document.getElementById('selCount1').textContent=selected.size;
+  document.getElementById('selCount2').textContent=[...selected].filter(id=>{const i=S.items.find(x=>x.client_capture_id===id);return i&&canDelete(i);}).length;
+}
+function setFilter(k){ filter=k; renderReview(); }
+function toggleSelect(){ selectMode=!selectMode; selected.clear();
+  document.getElementById('selBtn').classList.toggle('on',selectMode);
+  document.getElementById('selBtn').textContent=selectMode?'ยกเลิก':'เลือก';
+  document.getElementById('batchBar').classList.toggle('on',selectMode); renderReview(); }
+function toggleSel(id){ selected.has(id)?selected.delete(id):selected.add(id); renderReview(); }
+function batchReview(){ [...selected].forEach(id=>{ const i=S.items.find(x=>x.client_capture_id===id);
+  if(i&&!i.reviewed){ i.reviewed=true; i.updated_at=now(); logEvent('review',id,'batch'); } });
+  persist(); toggleSelect(); }
+function batchDelete(){
+  const dels=[...selected].filter(id=>{const i=S.items.find(x=>x.client_capture_id===id);return i&&canDelete(i);});
+  if(!dels.length){ toast('ไม่มีรายการที่ลบได้ (ลบได้เฉพาะ "รอส่ง" ของตัวเอง/ผู้ดูแล)'); return; }
+  if(!confirm('ลบ '+dels.length+' รายการ?')) return;
+  S.items=S.items.filter(i=>!dels.includes(i.client_capture_id));
+  dels.forEach(id=>logEvent('delete',id,'batch')); persist(); toggleSelect();
+}
+function quickDelete(id){ const i=S.items.find(x=>x.client_capture_id===id);
+  if(!i||!canDelete(i)) return;
+  if(confirm('ลบรายการนี้?')){ S.items=S.items.filter(x=>x.client_capture_id!==id);
+    logEvent('delete',id,'manual'); persist(); renderReview(); } }
+function markReviewed(id){ const i=S.items.find(x=>x.client_capture_id===id); if(!i) return;
+  i.reviewed=true; i.updated_at=now(); logEvent('review',id); persist(); renderReview(); }
+function syncInfo(){ const pend=S.items.filter(i=>i.status==='pending').length;
+  alert(pend?('มี '+pend+' รายการยังไม่ส่งออก — กด Export ด้านล่างเมื่อครบชุด'):'ทุกรายการส่งออกแล้ว ✓'); }
+
+// ─────────── edit (submitted → new revision, D8) ───────────
+let edit={id:null,zoneMain:null,zoneSub:null,photo:null,barcode:null,flags:[],severity:{},damage:{}};
+function openEdit(id){
+  const i=S.items.find(x=>x.client_capture_id===id); if(!i) return;
+  if(!isAdmin()&&i.created_by!==S.user.name){ toast('แก้ได้เฉพาะรายการของตัวเอง'); return; }
+  edit={id,zoneMain:i.zone_main,zoneSub:i.zone_sub,photo:i.photo,barcode:i.barcode_value,
+    flags:[...i.flags],severity:{...i.severity},damage:{...(i.damage_details||{})}};
+  document.getElementById('editWarn').innerHTML=i.status==='submitted'
+    ?'<div class="card" style="background:#fff7e6; border-color:#f0dcb8"><b>⚠ รายการนี้ส่งออกไปแล้ว</b><br><span class="hint">การแก้ไขจะสร้างรายการรุ่นใหม่ — ของเดิมเก็บเป็นประวัติ ไม่ถูกแก้ทับ</span></div>':'';
+  document.getElementById('eText').value=i.text;
+  document.getElementById('eCost').value=i.cost_code||'';
+  document.getElementById('ePrice').value=i.sale_price||'';
+  document.getElementById('delBtn').style.display=canDelete(i)?'flex':'none';
+  renderEdit(); show('edit');
+}
+function renderEdit(){
+  document.getElementById('eZoneVal').textContent=edit.zoneMain+(edit.zoneSub?' · '+edit.zoneSub:'');
+  document.getElementById('ePhotoBtn').className='evbtn tapbtn'+(edit.photo?' done':'');
+  document.getElementById('ePhotoBtn').innerHTML=edit.photo?'✓ มีรูป (ถ่ายใหม่=แทน)':'📷 ถ่ายสลาก';
+  document.getElementById('eBcBtn').className='evbtn tapbtn'+(edit.barcode?' done':'');
+  document.getElementById('eBcBtn').innerHTML=edit.barcode?('✓ '+esc(edit.barcode)):'▥ สแกนบาร์โค้ด';
+  renderFlagsInto('eFlagGrid','eSevPanels',edit,true);
+}
+function saveEdit(){
+  const orig=S.items.find(x=>x.client_capture_id===edit.id); if(!orig) return;
+  const text=document.getElementById('eText').value.trim();
+  if(!text){ toast('ข้อความสินค้าห้ามว่าง'); return; }
+  const vals={zone_main:edit.zoneMain,zone_sub:edit.zoneSub,text,
+    cost_code:document.getElementById('eCost').value||null,
+    sale_price:document.getElementById('ePrice').value||null,
+    barcode_value:edit.barcode,photo:edit.photo,
+    flags:[...edit.flags],severity:{...edit.severity},damage_details:{...edit.damage}};
+  if(orig.status==='submitted'){
+    if(!confirm('สร้างรายการรุ่นใหม่แทนของที่ส่งแล้ว?')) return;
+    const nu={...orig,...vals,client_capture_id:uuid(),revision:orig.revision+1,
+      supersedes_capture_id:orig.client_capture_id,status:'pending',reviewed:false,
+      exported_at:null,created_at:now(),updated_at:now(),created_by:S.user.name};
+    orig.status='superseded'; orig.updated_at=now();
+    S.items.push(nu); logEvent('edit',nu.client_capture_id,'revision of '+orig.client_capture_id);
+  } else { Object.assign(orig,vals); orig.reviewed=false; // เนื้อหาเปลี่ยน = ต้องไล่ตรวจใหม่
+    orig.updated_at=now(); logEvent('edit',orig.client_capture_id); }
+  persist(); show('review');
+}
+function deleteCurrent(){
+  const i=S.items.find(x=>x.client_capture_id===edit.id);
+  if(!i||!canDelete(i)) return;
+  if(!confirm('ลบรายการนี้?')) return;
+  S.items=S.items.filter(x=>x.client_capture_id!==edit.id);
+  logEvent('delete',edit.id,'manual'); persist(); show('review');
+}
+
+// ─────────── export / clear (the module contract — docs/01-input.md §4.3) ───────────
+// batch (default) = only "รอส่ง" rows; full = everything still on the device.
+// Re-sending is always safe: the importer dedupes on client_capture_id.
+function buildExportPayload(all){
+  const items=all?S.items:S.items.filter(i=>i.status==='pending');
+  return {app:'shop-input',format_version:1,export_mode:all?'full':'batch',
+    exported_at:now(),exported_by:S.user?S.user.name:null,items,events:S.events};
+}
+// paste-friendly copy: photos stripped (base64 in chat = noise; the downloaded file keeps them)
+function exportTextForPaste(payload){
+  const slim={...payload, photos_stripped:true, items:payload.items.map(i=>({...i,
+    photo:i.photo?'(มีรูป — อยู่ในไฟล์ .json ที่ดาวน์โหลด)':null,
+    damage_details:Object.fromEntries(Object.entries(i.damage_details||{}).map(([k,v])=>
+      [k,{...v,photo:v&&v.photo?'(มีรูป)':null}]))
+  }))};
+  return JSON.stringify(slim);
+}
+async function copyText(t){
+  try{ if(navigator.clipboard&&window.isSecureContext){ await navigator.clipboard.writeText(t); return true; } }catch(e){}
+  try{ const ta=document.createElement('textarea'); ta.value=t;
+    ta.style.cssText='position:fixed;opacity:0;left:0;top:0';
+    document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand('copy'); ta.remove(); return ok; }catch(e){ return false; }
+}
+function exportData(all){
+  const payload=buildExportPayload(all);
+  if(!payload.items.length){ toast(all?'ยังไม่มีรายการในเครื่อง':'ไม่มีรายการใหม่ที่รอส่ง'); return; }
+  const stamp=payload.exported_at, marked=[];
+  S.items.forEach(i=>{ if(i.status==='pending'){ i.status='submitted'; i.exported_at=stamp; marked.push(i); } });
+  logEvent('export',null,payload.items.length+' items ('+payload.export_mode+')');
+  if(!persist()){ marked.forEach(i=>{ i.status='pending'; i.exported_at=null; }); S.events.pop(); return; }
+  const name='shop-input-export-'+stamp.slice(0,16).replace(/[-:T]/g,'').replace(/^(\d{8})/,'$1-')+(all?'-full':'')+'.json';
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  renderReview();
+  copyText(exportTextForPaste(payload)).then(ok=>{
+    alert('ส่งออกแล้ว '+payload.items.length+' รายการ: '+name+'\n'+
+      (ok?'✓ คัดลอกข้อความใส่คลิปบอร์ดแล้ว — วางในแชท Claude ได้เลย (รูปอยู่ในไฟล์ดาวน์โหลด)'
+         :'คัดลอกอัตโนมัติไม่ได้ — กดปุ่ม "คัดลอกข้อความทั้งหมด" หรือใช้ไฟล์ที่ดาวน์โหลด')+
+      '\nหรือวางไฟล์ใน scripts/poc/captures/ ก็ได้');
+  });
+}
+// human-readable report — CSV with BOM so Excel renders Thai; read-only, statuses untouched
+function buildCSV(){
+  const items=S.items.filter(i=>i.status!=='superseded');
+  const q=v=>{ v=v==null?'':String(v); return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const head=['ลำดับ','รายการ','โซน','จุดย่อย','ทุน (โค้ด)','ราคาขาย','บาร์โค้ด','มีรูป','สถานะสินค้า','คนเก็บ','เวลาเก็บ','การส่ง','ตรวจแล้ว'];
+  return '﻿'+[head.join(',')].concat(items.map((i,ix)=>[
+    ix+1, i.text, i.zone_main, i.zone_sub||'', i.cost_code||'', i.sale_price||'',
+    i.barcode_value||'', i.photo?'มี':'',
+    i.flags.map(f=>f+(i.severity[f]?' ('+i.severity[f]+')':'')).join(' / '),
+    i.created_by, new Date(i.created_at).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'}),
+    i.status==='submitted'?'ส่งแล้ว':'รอส่ง', i.reviewed?'ตรวจแล้ว':''
+  ].map(q).join(','))).join('\r\n');
+}
+function exportCSV(){
+  if(!S.items.filter(i=>i.status!=='superseded').length){ toast('ยังไม่มีรายการ'); return; }
+  const name='shop-input-report-'+now().slice(0,16).replace(/[-:T]/g,'').replace(/^(\d{8})/,'$1-')+'.csv';
+  const blob=new Blob([buildCSV()],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  logEvent('report',null,name);
+  toast('✓ ดาวน์โหลดรายงานแล้ว — เปิดใน Excel ได้เลย');
+}
+// copy on demand — no export needed, statuses untouched
+function copyForPaste(){
+  const payload=buildExportPayload(true);
+  if(!payload.items.length){ toast('ยังไม่มีรายการในเครื่อง'); return; }
+  copyText(exportTextForPaste(payload)).then(ok=>
+    toast(ok?'✓ คัดลอก '+payload.items.length+' รายการแล้ว — วางในแชทได้เลย'
+            :'คัดลอกไม่สำเร็จ — ใช้ไฟล์ที่ดาวน์โหลดแทน'));
+}
+function clearSubmitted(){
+  const n=S.items.filter(i=>i.status!=='pending').length;
+  if(!n){ toast('ไม่มีรายการที่ส่งแล้ว'); return; }
+  if(!confirm('ล้าง '+n+' รายการที่ส่งออกแล้ว? (ประวัติอยู่ในไฟล์ export เรียบร้อย)')) return;
+  S.items=S.items.filter(i=>i.status==='pending');
+  logEvent('clear',null,n+' submitted items removed from device');
+  persist(); renderReview();
+}
+function meter(){
+  const kb=Math.round((localStorage.getItem(LS)||'').length/1024);
+  const el=document.getElementById('storageMeter'); if(!el) return;
+  el.textContent=`พื้นที่ใช้ไป ~${kb} KB / ~5,000 KB — Export แล้วล้าง = เริ่มชุดใหม่`;
+  el.style.color=kb>4000?'var(--danger)':'';
+}
+
+// ─────────── boot ───────────
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('fPhoto').addEventListener('change',e=>{
+    if(!e.target.files[0]) return;
+    compressPhoto(e.target.files[0],d=>{ cap.photo=d; renderCapture(); }); e.target.value='';
+  });
+  document.getElementById('ePhoto').addEventListener('change',e=>{
+    if(!e.target.files[0]) return;
+    compressPhoto(e.target.files[0],d=>{ edit.photo=d; renderEdit(); }); e.target.value='';
+  });
+  document.getElementById('dmgPhoto').addEventListener('change',e=>{
+    if(!e.target.files[0]||!dmgCtx) return;
+    compressPhoto(e.target.files[0],d=>{ const x=dmgCtx.obj.damage[dmgCtx.flag]||{}; x.photo=d;
+      dmgCtx.obj.damage[dmgCtx.flag]=x; toast('แนบรูปแล้ว'); }); e.target.value='';
+  });
+  for(const id of ['fCost','eCost']) document.getElementById(id).addEventListener('input',e=>{
+    e.target.value=e.target.value.toUpperCase().replace(/[^A-Z]/g,''); });
+  for(const id of ['fPrice','ePrice']) document.getElementById(id).addEventListener('input',e=>{
+    e.target.value=e.target.value.replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1'); });
+  renderLogin();
+  if(S.user){ document.getElementById('avBtn').textContent=S.user.name[0]; show('capture'); }
+  else show('login');
+});
+</script>
+</body>
+</html>
