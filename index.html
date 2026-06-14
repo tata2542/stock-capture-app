@@ -501,13 +501,14 @@ function account(){ if(confirm(S.user.name+' — ออกจากระบบ?
 
 // ─────────── capture state ───────────
 let cap={zoneMain:null,zoneSub:null,photo:null,barcode:null,flags:[],severity:{},damage:{}};
+let photoInflight=0;  // >0 while a photo is still compressing — save waits for it (no cross-row leak)
 function allFlags(){ return [...CORE_FLAGS,...S.customFlags]; }
 function renderCapture(){
   const zv=document.getElementById('zoneVal');
   if(cap.zoneMain){ zv.textContent=cap.zoneMain+(cap.zoneSub?' · '+cap.zoneSub:''); zv.classList.remove('unset'); }
   else{ zv.textContent='ยังไม่เลือก — แตะเพื่อเลือก'; zv.classList.add('unset'); }
   document.getElementById('photoBtn').className='evbtn tapbtn'+(cap.photo?' done':'');
-  document.getElementById('photoBtn').innerHTML=cap.photo?'✓ มีรูปแล้ว (ถ่ายใหม่=แทน)':'📷 ถ่ายสลาก';
+  document.getElementById('photoBtn').innerHTML=photoInflight>0?'⏳ กำลังย่อรูป…':(cap.photo?'✓ มีรูปแล้ว (ถ่ายใหม่=แทน)':'📷 ถ่ายสลาก');
   document.getElementById('bcBtn').className='evbtn tapbtn'+(cap.barcode?' done':'');
   document.getElementById('bcBtn').innerHTML=cap.barcode?('✓ '+esc(cap.barcode)):'▥ สแกนบาร์โค้ด';
   renderFlagsInto('flagGrid','sevPanels',cap,true);
@@ -722,6 +723,7 @@ function saveItem(){
   const text=document.getElementById('fText').value.trim();
   if(!text){ toast('ยังไม่มีข้อความสินค้า — กดค้างปุ่มไมค์แล้วพูด'); return; }
   if(!cap.zoneMain){ toast('เลือกโซนที่เก็บก่อน'); openZoneSheet(); return; }
+  if(photoInflight>0){ toast('กำลังย่อรูป… รอแป๊บแล้วเลื่อนอีกครั้ง'); return; }
   if(lastSavedId) finalizeUndo(); // ปิดรอบก่อนหน้า (§8.1 กันบันทึกรัว)
   const item={
     client_capture_id:uuid(), revision:1, supersedes_capture_id:null,
@@ -867,6 +869,7 @@ function saveEdit(){
   const orig=S.items.find(x=>x.client_capture_id===edit.id); if(!orig) return;
   const text=document.getElementById('eText').value.trim();
   if(!text){ toast('ข้อความสินค้าห้ามว่าง'); return; }
+  if(photoInflight>0){ toast('กำลังย่อรูป… รอแป๊บแล้วบันทึกอีกครั้ง'); return; }
   const vals={zone_main:edit.zoneMain,zone_sub:edit.zoneSub,text,
     cost_code:document.getElementById('eCost').value||null,
     sale_price:document.getElementById('ePrice').value||null,
@@ -1002,11 +1005,13 @@ if(bc){
 document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('fPhoto').addEventListener('change',e=>{
     if(!e.target.files[0]) return;
-    compressPhoto(e.target.files[0],d=>{ cap.photo=d; renderCapture(); }); e.target.value='';
+    photoInflight++; renderCapture();
+    compressPhoto(e.target.files[0],d=>{ cap.photo=d; photoInflight--; renderCapture(); }); e.target.value='';
   });
   document.getElementById('ePhoto').addEventListener('change',e=>{
     if(!e.target.files[0]) return;
-    compressPhoto(e.target.files[0],d=>{ edit.photo=d; renderEdit(); }); e.target.value='';
+    photoInflight++;
+    compressPhoto(e.target.files[0],d=>{ edit.photo=d; photoInflight--; renderEdit(); }); e.target.value='';
   });
   document.getElementById('dmgPhoto').addEventListener('change',e=>{
     if(!e.target.files[0]||!dmgCtx) return;
