@@ -213,6 +213,17 @@
   .toastpill{position:fixed; left:50%; transform:translateX(-50%); bottom:18px; background:var(--ink);
     color:#fff; border-radius:999px; padding:10px 18px; display:none; z-index:50; font-size:14.5px}
   .toastpill.on{display:block}
+  #scanOverlay{position:fixed; inset:0; background:#000; z-index:60; display:none}
+  #scanOverlay.on{display:block}
+  #scanVideo{width:100%; height:100%; object-fit:cover}
+  .scanframe{position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:74%; height:170px; border:3px solid #fff; border-radius:14px;
+    box-shadow:0 0 0 100vmax rgba(0,0,0,.45)}
+  .scanmsg{position:fixed; top:calc(50% + 110px); left:0; right:0; text-align:center;
+    color:#fff; font-size:16px; padding:0 24px; text-shadow:0 1px 3px #000}
+  .scanbtns{position:fixed; bottom:0; left:0; right:0; max-width:520px; margin:0 auto;
+    display:flex; gap:10px; padding:14px 16px 24px}
+  .scanbtns .btn{background:#fff}
 </style>
 </head>
 <body>
@@ -402,6 +413,16 @@
 </div>
 
 <div class="toastpill" id="toastPill"></div>
+
+<div id="scanOverlay" style="display:none">
+  <video id="scanVideo" playsinline muted></video>
+  <div class="scanframe"></div>
+  <div class="scanmsg" id="scanMsg">กำลังเปิดกล้อง…</div>
+  <div class="scanbtns">
+    <button class="btn btn-line tapbtn" onclick="manualBarcode()">⌨ พิมพ์เอง</button>
+    <button class="btn btn-line tapbtn" onclick="closeScan()">ปิด</button>
+  </div>
+</div>
 
 <div id="tabLock" style="display:none; position:fixed; inset:0; background:rgba(28,28,26,.92); z-index:99; color:#fff; text-align:center; padding:40px 24px">
   <div style="font-size:44px; margin-top:18vh">⚠️</div>
@@ -593,12 +614,55 @@ function compressPhoto(file,cb){
   img.src=URL.createObjectURL(file);
 }
 
-// ─────────── barcode (wedge scanner / typed; camera needs HTTPS — spec §6) ───────────
-function askBarcode(forEdit){
-  const v=prompt('ยิงสแกนเนอร์ลงช่องนี้ หรือพิมพ์เลขบาร์โค้ด', (forEdit?edit.barcode:cap.barcode)||'');
+// ─────────── barcode — live camera scan (HTTPS) with manual fallback ───────────
+// Camera decode uses native BarcodeDetector (Android/Chrome) or a lazy-loaded
+// ponyfill (iOS Safari). Falls back to typing if camera/decoder unavailable
+// (e.g. the LAN http:// route). Wedge scanners also still work via พิมพ์เอง.
+let scanStream=null, scanLoop=null, scanForEdit=false, BDClass=undefined;
+async function ensureBD(){
+  if(BDClass!==undefined) return BDClass;
+  if('BarcodeDetector' in window){ BDClass=window.BarcodeDetector; return BDClass; }
+  try{ const m=await import('https://cdn.jsdelivr.net/npm/barcode-detector@2/dist/es/pure.min.js');
+    BDClass=m.BarcodeDetector; }catch(e){ BDClass=null; }
+  return BDClass;
+}
+function setScanMsg(m){ document.getElementById('scanMsg').textContent=m; }
+async function askBarcode(forEdit){
+  scanForEdit=!!forEdit;
+  document.getElementById('scanOverlay').classList.add('on');
+  setScanMsg('กำลังเปิดกล้อง…');
+  const v=document.getElementById('scanVideo');
+  try{
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+    v.srcObject=scanStream; await v.play();
+  }catch(e){ setScanMsg('เปิดกล้องไม่ได้ — กด “พิมพ์เอง” หรือถ่ายรูปบาร์โค้ดไว้ก็ได้'); return; }
+  let det;
+  try{ const BD=await ensureBD(); if(!BD) throw 0;
+    det=new BD({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','codabar']}); }
+  catch(e){ setScanMsg('เครื่องนี้สแกนอัตโนมัติไม่ได้ — กด “พิมพ์เอง” หรือถ่ายรูปบาร์โค้ด'); return; }
+  setScanMsg('เล็งกล้องไปที่บาร์โค้ด');
+  scanLoop=setInterval(async()=>{
+    try{ const codes=await det.detect(v);
+      if(codes&&codes.length){ const val=(codes[0].rawValue||'').trim(); if(val) applyBarcode(val); }
+    }catch(e){}
+  },300);
+}
+function applyBarcode(val){
+  (scanForEdit?edit:cap).barcode=val; closeScan();
+  scanForEdit?renderEdit():renderCapture(); toast('✓ บาร์โค้ด '+val);
+}
+function manualBarcode(){
+  const cur=(scanForEdit?edit.barcode:cap.barcode)||'';
+  const v=prompt('พิมพ์เลขบาร์โค้ด (หรือยิงเครื่องสแกนมือลงช่องนี้)',cur);
   if(v===null) return;
-  const t=forEdit?edit:cap; t.barcode=v.trim()||null;
-  forEdit?renderEdit():renderCapture();
+  (scanForEdit?edit:cap).barcode=v.trim()||null; closeScan();
+  scanForEdit?renderEdit():renderCapture();
+}
+function closeScan(){
+  if(scanLoop){ clearInterval(scanLoop); scanLoop=null; }
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  const v=document.getElementById('scanVideo'); if(v) v.srcObject=null;
+  document.getElementById('scanOverlay').classList.remove('on');
 }
 
 // ─────────── hold-to-talk (D1: new speech REPLACES) ───────────
