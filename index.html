@@ -420,12 +420,12 @@
 
 <div class="toastpill" id="toastPill"></div>
 
-<div id="scanOverlay" style="display:none">
-  <video id="scanVideo" playsinline muted></video>
+<div id="scanOverlay">
+  <video id="scanVideo" playsinline muted autoplay></video>
   <div class="scanframe"></div>
   <div class="scanmsg" id="scanMsg">กำลังเปิดกล้อง…</div>
   <div class="scanbtns">
-    <button class="btn btn-line tapbtn" onclick="manualBarcode()">⌨ พิมพ์เอง</button>
+    <button class="btn btn-primary tapbtn" onclick="manualBarcode()">⌨ พิมพ์เลขเอง</button>
     <button class="btn btn-line tapbtn" onclick="closeScan()">ปิด</button>
   </div>
 </div>
@@ -642,18 +642,20 @@ async function ensureBD(){
 function setScanMsg(m){ document.getElementById('scanMsg').textContent=m; }
 async function askBarcode(forEdit){
   scanForEdit=!!forEdit;
-  document.getElementById('scanOverlay').classList.add('on');
+  document.getElementById('scanOverlay').classList.add('on');   // โชว์หน้าสแกน+ปุ่มทันที (ไม่รอกล้อง/ตัวอ่าน)
   setScanMsg('กำลังเปิดกล้อง…');
   const v=document.getElementById('scanVideo');
   try{
     scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
     v.srcObject=scanStream; await v.play();
-  }catch(e){ setScanMsg('เปิดกล้องไม่ได้ — กด “พิมพ์เอง” หรือถ่ายรูปบาร์โค้ดไว้ก็ได้'); return; }
+  }catch(e){ setScanMsg('เปิดกล้องไม่ได้ — แตะ “พิมพ์เลขเอง” ด้านล่าง'); return; }
+  setScanMsg('เล็งบาร์โค้ดให้อยู่ในกรอบ (ถ้าไม่ติด แตะ “พิมพ์เลขเอง”)');
+  // ตัวอ่านอัตโนมัติ = best-effort, โหลดเบื้องหลัง ไม่บล็อกหน้าจอ
   let det;
   try{ const BD=await ensureBD(); if(!BD) throw 0;
     det=new BD({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','codabar']}); }
-  catch(e){ setScanMsg('เครื่องนี้สแกนอัตโนมัติไม่ได้ — กด “พิมพ์เอง” หรือถ่ายรูปบาร์โค้ด'); return; }
-  setScanMsg('เล็งกล้องไปที่บาร์โค้ด');
+  catch(e){ setScanMsg('สแกนอัตโนมัติไม่ได้บนเครื่องนี้ — แตะ “พิมพ์เลขเอง” ด้านล่าง'); return; }
+  if(!document.getElementById('scanOverlay').classList.contains('on')) return; // ปิดไปแล้วระหว่างโหลด
   scanLoop=setInterval(async()=>{
     try{ const codes=await det.detect(v);
       if(codes&&codes.length){ const val=(codes[0].rawValue||'').trim(); if(val) applyBarcode(val); }
